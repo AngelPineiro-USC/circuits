@@ -289,7 +289,7 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
   }
 
   return `\
-<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">\
+<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMinYMin meet">\
   <rect x="0" y="0" width="${width}" height="${height}" fill="#f8fafc" />\
   ${body}\
 </svg>`;

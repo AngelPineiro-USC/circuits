@@ -85,6 +85,13 @@ h3 {
   border: 1px solid #e2e8f0;
 }
 
+/* Keep schematic readable on mobile by avoiding aggressive downscaling */
+.svg svg {
+  min-width: 780px;
+  height: auto;
+  display: block;
+}
+
 .hint {
   margin-top: 8px;
   color: #64748b;
