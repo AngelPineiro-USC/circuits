@@ -1,4 +1,5 @@
 import type { Circuit, Element, NodeId, Resistor, VSource, ISource } from "../types";
+import { placeLabels, type Label, type Rect } from "./labelPlacement";
 
 export type Point = { x: number; y: number };
 export type NodePos = Record<NodeId, Point>;
@@ -63,13 +64,10 @@ function hashStr(s: string): number {
   return h >>> 0;
 }
 
-function labelOffset(id: string, dir: Point): { dx: number; dy: number } {
-  // Pick among multiple candidate directions/magnitudes deterministically.
-  // This is a lightweight "collision reduction" heuristic.
-  const h = hashStr(id);
-
-  // Candidate direction unit vectors (screen space)
+function labelCandidates(dir: Point): Array<{ dx: number; dy: number }> {
+  const perp = normalize({ x: -dir.y, y: dir.x });
   const dirs: Point[] = [
+    perp,
     { x: 0, y: -1 },
     { x: 1, y: -1 },
     { x: 1, y: 0 },
@@ -78,17 +76,15 @@ function labelOffset(id: string, dir: Point): { dx: number; dy: number } {
     { x: -1, y: 1 },
     { x: -1, y: 0 },
     { x: -1, y: -1 },
+    { x: -perp.x, y: -perp.y },
   ].map(normalize);
 
-  // Bias one candidate to be perpendicular to the element direction.
-  const perp = normalize({ x: -dir.y, y: dir.x });
-  dirs[0] = perp;
-  dirs[4] = { x: -perp.x, y: -perp.y };
-
-  const idx = h % dirs.length;
-  const mag = 28 + ((h >>> 3) % 4) * 12; // 28, 40, 52, 64
-  const v = dirs[idx];
-  return { dx: v.x * mag, dy: v.y * mag };
+  const mags = [24, 36, 48, 60, 72];
+  const out: Array<{ dx: number; dy: number }> = [];
+  for (const d of dirs) {
+    for (const m of mags) out.push({ dx: d.x * m, dy: d.y * m });
+  }
+  return out;
 }
 
 function dist(a: Point, b: Point): number {
@@ -229,7 +225,61 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
 
   let body = "";
 
+  // Obstacles: node markers + source symbols in the middle of element routes.
+  const obstacles: Rect[] = [];
+  for (const n of circuit.nodes) {
+    const p = pos[n];
+    obstacles.push({ x: p.x - 10, y: p.y - 10, w: 20, h: 20 });
+  }
+
+  // First pass: compute anchors/dirs for element labels.
+  const labels: Label[] = [];
+
   // Wires/elements
+  for (const e of circuit.elements) {
+    const p1 = pos[e.a];
+    const p2 = pos[e.b];
+    const route = routeForElementId(p1, p2, (e as any).id ?? `${e.kind}:${e.a}->${e.b}`);
+    const total = polyLen(route);
+    const midD = total / 2;
+    const c = pointAt(route, midD);
+
+    if (el(e, "R")) {
+      const r = e as Resistor;
+      labels.push({
+        id: r.id,
+        text: `${r.id}  ${r.ohms} Ω`,
+        anchor: c.p,
+        candidates: labelCandidates(c.dir),
+      });
+    } else if (el(e, "V")) {
+      const v = e as VSource;
+      obstacles.push({ x: c.p.x - 16, y: c.p.y - 16, w: 32, h: 32 });
+      labels.push({
+        id: v.id,
+        text: `${v.id}  ${v.volts} V`,
+        anchor: c.p,
+        candidates: labelCandidates(c.dir),
+      });
+    } else if (el(e, "I")) {
+      const s = e as ISource;
+      obstacles.push({ x: c.p.x - 16, y: c.p.y - 16, w: 32, h: 32 });
+      labels.push({
+        id: s.id,
+        text: `${s.id}  ${s.amps} A`,
+        anchor: c.p,
+        candidates: labelCandidates(c.dir),
+      });
+    }
+  }
+
+  const placed = placeLabels(labels, {
+    viewport: { x: 0, y: 0, w: width, h: height },
+    obstacles,
+  });
+  const placedById = new Map(placed.map((p) => [p.id, p]));
+
+  // Second pass: render
   for (const e of circuit.elements) {
     const p1 = pos[e.a];
     const p2 = pos[e.b];
@@ -259,8 +309,8 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
       body += arrow(c.p, c.dir);
 
       // Label offset (deterministic) to reduce collisions when multiple elements meet near a node.
-      const off = labelOffset(r.id, c.dir);
-      body += elementLabel({ x: c.p.x + off.dx, y: c.p.y + off.dy }, `${r.id}  ${r.ohms} Ω`);
+      const pl = placedById.get(r.id);
+      if (pl) body += elementLabel({ x: pl.x, y: pl.y }, pl.text);
 
       // Small junction markers at symbol endpoints to make the break clear.
       body += circle(s1.p, 2.2, "#0f172a");
@@ -284,8 +334,8 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
       body += `<text x="${c.p.x - n.x * 6}" y="${c.p.y - n.y * 6}" font-size="14" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">+</text>`;
       body += `<text x="${c.p.x + n.x * 6}" y="${c.p.y + n.y * 6}" font-size="14" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">−</text>`;
 
-      const off = labelOffset(v.id, c.dir);
-      body += elementLabel({ x: c.p.x + off.dx, y: c.p.y + off.dy }, `${v.id}  ${v.volts} V`);
+      const pl = placedById.get(v.id);
+      if (pl) body += elementLabel({ x: pl.x, y: pl.y }, pl.text);
 
       body += circle(s1.p, 2.2, "#0f172a");
       body += circle(s2.p, 2.2, "#0f172a");
@@ -303,8 +353,8 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
 
       body += `<circle cx="${c.p.x}" cy="${c.p.y}" r="14" fill="#fff" stroke="#0f172a" stroke-width="2" />`;
       body += arrow({ x: c.p.x - c.dir.x * 6, y: c.p.y - c.dir.y * 6 }, c.dir, 8);
-      const off = labelOffset(s.id, c.dir);
-      body += elementLabel({ x: c.p.x + off.dx, y: c.p.y + off.dy }, `${s.id}  ${s.amps} A`);
+      const pl = placedById.get(s.id);
+      if (pl) body += elementLabel({ x: pl.x, y: pl.y }, pl.text);
 
       body += circle(s1.p, 2.2, "#0f172a");
       body += circle(s2.p, 2.2, "#0f172a");
