@@ -51,7 +51,24 @@ function text(p: Point, t: string, dy = -10): string {
 }
 
 function elementLabel(p: Point, t: string): string {
-  return `<text x="${p.x}" y="${p.y}" font-family="ui-sans-serif, system-ui" font-size="12" fill="#111827" text-anchor="middle">${t}</text>`;
+  return `<text x="${p.x}" y="${p.y}" font-family="ui-sans-serif, system-ui" font-size="12" fill="#111827" text-anchor="middle" dominant-baseline="middle">${t}</text>`;
+}
+
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function labelOffset(id: string, dir: Point): { dx: number; dy: number } {
+  const h = hashStr(id);
+  const sign = h % 2 === 0 ? 1 : -1;
+  const mag = 20 + ((h >>> 1) % 3) * 10; // 20, 30, 40
+  const n = normalize({ x: -dir.y, y: dir.x });
+  return { dx: n.x * mag * sign, dy: n.y * mag * sign };
 }
 
 function dist(a: Point, b: Point): number {
@@ -218,9 +235,9 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
       // Current direction arrow (convention: a → b) near the symbol.
       body += arrow(c.p, c.dir);
 
-      // Label slightly off the wire.
-      const n = { x: -c.dir.y, y: c.dir.x };
-      body += elementLabel({ x: c.p.x + n.x * 18, y: c.p.y + n.y * 18 }, `${r.id}  ${r.ohms} Ω`);
+      // Label offset (deterministic) to reduce collisions when multiple elements meet near a node.
+      const off = labelOffset(r.id, c.dir);
+      body += elementLabel({ x: c.p.x + off.dx, y: c.p.y + off.dy }, `${r.id}  ${r.ohms} Ω`);
 
       // Small junction markers at symbol endpoints to make the break clear.
       body += circle(s1.p, 2.2, "#0f172a");
@@ -240,11 +257,12 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
       body += `<circle cx="${c.p.x}" cy="${c.p.y}" r="14" fill="#fff" stroke="#0f172a" stroke-width="2" />`;
 
       // Polarity inside the symbol (a is +, b is -).
-      const n = { x: -c.dir.y, y: c.dir.x };
+      const n = normalize({ x: -c.dir.y, y: c.dir.x });
       body += `<text x="${c.p.x - n.x * 6}" y="${c.p.y - n.y * 6}" font-size="14" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">+</text>`;
       body += `<text x="${c.p.x + n.x * 6}" y="${c.p.y + n.y * 6}" font-size="14" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">−</text>`;
 
-      body += elementLabel({ x: c.p.x, y: c.p.y - 20 }, `${v.id}  ${v.volts} V`);
+      const off = labelOffset(v.id, c.dir);
+      body += elementLabel({ x: c.p.x + off.dx, y: c.p.y + off.dy }, `${v.id}  ${v.volts} V`);
 
       body += circle(s1.p, 2.2, "#0f172a");
       body += circle(s2.p, 2.2, "#0f172a");
@@ -262,7 +280,8 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
 
       body += `<circle cx="${c.p.x}" cy="${c.p.y}" r="14" fill="#fff" stroke="#0f172a" stroke-width="2" />`;
       body += arrow({ x: c.p.x - c.dir.x * 6, y: c.p.y - c.dir.y * 6 }, c.dir, 8);
-      body += elementLabel({ x: c.p.x, y: c.p.y - 20 }, `${s.id}  ${s.amps} A`);
+      const off = labelOffset(s.id, c.dir);
+      body += elementLabel({ x: c.p.x + off.dx, y: c.p.y + off.dy }, `${s.id}  ${s.amps} A`);
 
       body += circle(s1.p, 2.2, "#0f172a");
       body += circle(s2.p, 2.2, "#0f172a");
