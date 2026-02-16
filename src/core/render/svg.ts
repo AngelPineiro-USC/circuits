@@ -21,10 +21,10 @@ export function defaultLayout(circuit: Circuit): NodePos {
 
   // For our demo nodes, use a nice fixed placement.
   const known: Partial<NodePos> = {
-    n0: { x: 90, y: 150 },
-    n1: { x: 220, y: 70 },
-    n2: { x: 380, y: 150 },
-    n3: { x: 220, y: 250 },
+    n0: { x: 70, y: 170 },
+    n1: { x: 240, y: 70 },
+    n2: { x: 450, y: 170 },
+    n3: { x: 240, y: 300 },
   };
 
   const pos: NodePos = {};
@@ -85,19 +85,22 @@ function normalize(v: Point): Point {
   return { x: v.x / d, y: v.y / d };
 }
 
-function orthogonalRoute(p1: Point, p2: Point): Point[] {
+function orthogonalRoute(p1: Point, p2: Point, prefer: "h" | "v" = "h"): Point[] {
   // Prefer orthogonal wiring (L-shape) for readability.
   if (p1.x === p2.x || p1.y === p2.y) return [p1, p2];
 
-  const elbow1 = { x: p2.x, y: p1.y };
-  const elbow2 = { x: p1.x, y: p2.y };
+  const elbowH = { x: p2.x, y: p1.y }; // horizontal then vertical
+  const elbowV = { x: p1.x, y: p2.y }; // vertical then horizontal
 
-  const len1 = dist(p1, elbow1) + dist(elbow1, p2);
-  const len2 = dist(p1, elbow2) + dist(elbow2, p2);
+  if (prefer === "h") return [p1, elbowH, p2];
+  return [p1, elbowV, p2];
+}
 
-  // Tiny bias to keep the demo looking consistent: route horizontal first when equal.
-  if (Math.abs(len1 - len2) < 1e-6) return [p1, elbow1, p2];
-  return len1 < len2 ? [p1, elbow1, p2] : [p1, elbow2, p2];
+function routeForElementId(p1: Point, p2: Point, id: string): Point[] {
+  // Deterministically choose between the two L-shapes to reduce collisions.
+  const h = hashStr(id);
+  const prefer: "h" | "v" = h % 2 === 0 ? "h" : "v";
+  return orthogonalRoute(p1, p2, prefer);
 }
 
 function polyLen(points: Point[]): number {
@@ -210,7 +213,7 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
   for (const e of circuit.elements) {
     const p1 = pos[e.a];
     const p2 = pos[e.b];
-    const route = orthogonalRoute(p1, p2);
+    const route = routeForElementId(p1, p2, (e as any).id ?? `${e.kind}:${e.a}->${e.b}`);
     const total = polyLen(route);
     const midD = total / 2;
 
