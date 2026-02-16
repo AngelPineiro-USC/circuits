@@ -65,25 +65,42 @@ function hashStr(s: string): number {
 }
 
 function labelCandidates(dir: Point): Array<{ dx: number; dy: number }> {
-  const perp = normalize({ x: -dir.y, y: dir.x });
+  const u = normalize(dir);
+  const perp = normalize({ x: -u.y, y: u.x });
+
+  // Candidate directions: prefer perpendicular to the element, but include axis-aligned
+  // and along-the-element options for tight mobile layouts.
   const dirs: Point[] = [
     perp,
     { x: 0, y: -1 },
-    { x: 1, y: -1 },
     { x: 1, y: 0 },
-    { x: 1, y: 1 },
     { x: 0, y: 1 },
-    { x: -1, y: 1 },
     { x: -1, y: 0 },
+    { x: 1, y: -1 },
+    { x: 1, y: 1 },
+    { x: -1, y: 1 },
     { x: -1, y: -1 },
+    u,
+    { x: -u.x, y: -u.y },
     { x: -perp.x, y: -perp.y },
   ].map(normalize);
 
-  const mags = [24, 36, 48, 60, 72];
+  // Include a wider range so we can "escape" congested centers.
+  const mags = [22, 28, 36, 46, 58, 72, 88, 104];
   const out: Array<{ dx: number; dy: number }> = [];
   for (const d of dirs) {
     for (const m of mags) out.push({ dx: d.x * m, dy: d.y * m });
   }
+
+  // Also try a few pure axis-aligned offsets at larger radii (helps when the best spot is straight up/down/left/right).
+  const axis = [
+    { dx: 0, dy: -116 },
+    { dx: 0, dy: 116 },
+    { dx: -116, dy: 0 },
+    { dx: 116, dy: 0 },
+  ];
+  out.push(...axis);
+
   return out;
 }
 
@@ -225,11 +242,21 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
 
   let body = "";
 
-  // Obstacles: node markers + source symbols in the middle of element routes.
+  // Obstacles: node markers + element symbols in the middle of element routes.
+  // Make higher-degree (busier) nodes a bit "fatter" so labels are discouraged from crowding them.
+  const degree = new Map<NodeId, number>();
+  for (const n of circuit.nodes) degree.set(n, 0);
+  for (const e of circuit.elements) {
+    degree.set(e.a, (degree.get(e.a) ?? 0) + 1);
+    degree.set(e.b, (degree.get(e.b) ?? 0) + 1);
+  }
+
   const obstacles: Rect[] = [];
   for (const n of circuit.nodes) {
     const p = pos[n];
-    obstacles.push({ x: p.x - 10, y: p.y - 10, w: 20, h: 20 });
+    const d = degree.get(n) ?? 0;
+    const r = d >= 3 ? 18 : 14; // bigger around central junctions
+    obstacles.push({ x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r });
   }
 
   // First pass: compute anchors/dirs for element labels.
@@ -246,6 +273,19 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
 
     if (el(e, "R")) {
       const r = e as Resistor;
+
+      // Reserve space around the resistor zig-zag symbol so labels don't sit on top of it.
+      // Approximate a bounding box that covers the symbol plus a bit of padding.
+      const symLen = 46;
+      const amp = 6;
+      const u = normalize(c.dir);
+      const n = normalize({ x: -u.y, y: u.x });
+      const padU = symLen / 2 + 14;
+      const padN = amp + 16;
+      const dx = Math.abs(u.x) * padU + Math.abs(n.x) * padN;
+      const dy = Math.abs(u.y) * padU + Math.abs(n.y) * padN;
+      obstacles.push({ x: c.p.x - dx, y: c.p.y - dy, w: 2 * dx, h: 2 * dy });
+
       labels.push({
         id: r.id,
         text: `${r.id}  ${r.ohms} Ω`,
@@ -276,6 +316,9 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
   const placed = placeLabels(labels, {
     viewport: { x: 0, y: 0, w: width, h: height },
     obstacles,
+    refinePasses: 3,
+    nearDistPx: 12,
+    nearPenalty: 35,
   });
   const placedById = new Map(placed.map((p) => [p.id, p]));
 
