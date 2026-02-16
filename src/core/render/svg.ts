@@ -64,13 +64,13 @@ function hashStr(s: string): number {
   return h >>> 0;
 }
 
-function labelCandidates(dir: Point): Array<{ dx: number; dy: number }> {
+function labelCandidates(dir: Point, kind: "R" | "V" | "I"): Array<{ dx: number; dy: number }> {
   const u = normalize(dir);
   const perp = normalize({ x: -u.y, y: u.x });
 
-  // Candidate directions: prefer perpendicular to the element, but include axis-aligned
-  // and along-the-element options for tight mobile layouts.
-  const dirs: Point[] = [
+  // Candidate directions.
+  // For resistors, we avoid along-the-element directions because they tend to place text on top of the zig-zag/wire.
+  const base: Point[] = [
     perp,
     { x: 0, y: -1 },
     { x: 1, y: 0 },
@@ -85,14 +85,18 @@ function labelCandidates(dir: Point): Array<{ dx: number; dy: number }> {
     { x: -perp.x, y: -perp.y },
   ].map(normalize);
 
+  const dirs =
+    kind === "R" ? base.filter((d) => Math.abs(d.x * u.x + d.y * u.y) < 0.7) : base;
+
   // Include a wider range so we can "escape" congested centers.
-  const mags = [22, 28, 36, 46, 58, 72, 88, 104];
+  const mags = kind === "R" ? [36, 46, 58, 72, 88, 104, 124] : [22, 28, 36, 46, 58, 72, 88, 104];
+
   const out: Array<{ dx: number; dy: number }> = [];
   for (const d of dirs) {
     for (const m of mags) out.push({ dx: d.x * m, dy: d.y * m });
   }
 
-  // Also try a few pure axis-aligned offsets at larger radii (helps when the best spot is straight up/down/left/right).
+  // Pure axis-aligned offsets at larger radii.
   const axis = [
     { dx: 0, dy: -116 },
     { dx: 0, dy: 116 },
@@ -290,7 +294,7 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
         id: r.id,
         text: `${r.id}  ${r.ohms} Ω`,
         anchor: c.p,
-        candidates: labelCandidates(c.dir),
+        candidates: labelCandidates(c.dir, "R"),
       });
     } else if (el(e, "V")) {
       const v = e as VSource;
@@ -299,7 +303,7 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
         id: v.id,
         text: `${v.id}  ${v.volts} V`,
         anchor: c.p,
-        candidates: labelCandidates(c.dir),
+        candidates: labelCandidates(c.dir, "V"),
       });
     } else if (el(e, "I")) {
       const s = e as ISource;
@@ -308,7 +312,7 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
         id: s.id,
         text: `${s.id}  ${s.amps} A`,
         anchor: c.p,
-        candidates: labelCandidates(c.dir),
+        candidates: labelCandidates(c.dir, "I"),
       });
     }
   }
