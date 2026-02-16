@@ -21,10 +21,10 @@ export function defaultLayout(circuit: Circuit): NodePos {
 
   // For our demo nodes, use a nice fixed placement.
   const known: Partial<NodePos> = {
-    n0: { x: 80, y: 140 },
-    n1: { x: 200, y: 60 },
-    n2: { x: 320, y: 140 },
-    n3: { x: 200, y: 220 },
+    n0: { x: 90, y: 150 },
+    n1: { x: 220, y: 70 },
+    n2: { x: 380, y: 150 },
+    n3: { x: 220, y: 250 },
   };
 
   const pos: NodePos = {};
@@ -35,8 +35,9 @@ export function defaultLayout(circuit: Circuit): NodePos {
   return pos;
 }
 
-function line(p1: Point, p2: Point, stroke = "#1f2937", width = 2): string {
-  return `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${stroke}" stroke-width="${width}" />`;
+function polyline(points: Point[], stroke = "#0f172a", width = 2): string {
+  const pts = points.map((p) => `${p.x},${p.y}`).join(" ");
+  return `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" />`;
 }
 
 function circle(p: Point, r = 6, fill = "#111827"): string {
@@ -49,23 +50,136 @@ function text(p: Point, t: string, dy = -10): string {
   return `<text x="${x}" y="${y}" font-family="ui-sans-serif, system-ui" font-size="12" fill="#111827">${t}</text>`;
 }
 
-function mid(p1: Point, p2: Point): Point {
-  return { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-}
-
-function arrow(p1: Point, p2: Point): string {
-  // small arrowhead near p2
-  const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-  const len = 8;
-  const a1 = angle + Math.PI * 0.85;
-  const a2 = angle - Math.PI * 0.85;
-  const pA = { x: p2.x + len * Math.cos(a1), y: p2.y + len * Math.sin(a1) };
-  const pB = { x: p2.x + len * Math.cos(a2), y: p2.y + len * Math.sin(a2) };
-  return `<path d="M ${pA.x} ${pA.y} L ${p2.x} ${p2.y} L ${pB.x} ${pB.y}" fill="none" stroke="#111827" stroke-width="2" />`;
-}
-
 function elementLabel(p: Point, t: string): string {
   return `<text x="${p.x}" y="${p.y}" font-family="ui-sans-serif, system-ui" font-size="12" fill="#111827" text-anchor="middle">${t}</text>`;
+}
+
+function dist(a: Point, b: Point): number {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function lerp(a: Point, b: Point, t: number): Point {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
+function normalize(v: Point): Point {
+  const d = Math.hypot(v.x, v.y);
+  if (d < 1e-9) return { x: 1, y: 0 };
+  return { x: v.x / d, y: v.y / d };
+}
+
+function orthogonalRoute(p1: Point, p2: Point): Point[] {
+  // Prefer orthogonal wiring (L-shape) for readability.
+  if (p1.x === p2.x || p1.y === p2.y) return [p1, p2];
+
+  const elbow1 = { x: p2.x, y: p1.y };
+  const elbow2 = { x: p1.x, y: p2.y };
+
+  const len1 = dist(p1, elbow1) + dist(elbow1, p2);
+  const len2 = dist(p1, elbow2) + dist(elbow2, p2);
+
+  // Tiny bias to keep the demo looking consistent: route horizontal first when equal.
+  if (Math.abs(len1 - len2) < 1e-6) return [p1, elbow1, p2];
+  return len1 < len2 ? [p1, elbow1, p2] : [p1, elbow2, p2];
+}
+
+function polyLen(points: Point[]): number {
+  let L = 0;
+  for (let i = 0; i < points.length - 1; i++) L += dist(points[i], points[i + 1]);
+  return L;
+}
+
+function pointAt(points: Point[], d: number): { p: Point; dir: Point } {
+  // Point + direction along polyline at distance d.
+  let acc = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const seg = dist(a, b);
+    if (acc + seg >= d) {
+      const t = seg < 1e-9 ? 0 : (d - acc) / seg;
+      const p = lerp(a, b, t);
+      const dir = normalize({ x: b.x - a.x, y: b.y - a.y });
+      return { p, dir };
+    }
+    acc += seg;
+  }
+  const a = points[points.length - 2] ?? points[0];
+  const b = points[points.length - 1] ?? points[0];
+  return { p: b, dir: normalize({ x: b.x - a.x, y: b.y - a.y }) };
+}
+
+function prefixTo(points: Point[], d: number): Point[] {
+  const out: Point[] = [points[0]];
+  let acc = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const seg = dist(a, b);
+    if (acc + seg >= d) {
+      const t = seg < 1e-9 ? 0 : (d - acc) / seg;
+      out.push(lerp(a, b, t));
+      return out;
+    }
+    out.push(b);
+    acc += seg;
+  }
+  return out;
+}
+
+function suffixFrom(points: Point[], d: number): Point[] {
+  const total = polyLen(points);
+  const start = Math.max(0, Math.min(total, d));
+
+  // Build by walking forward and collecting from the start point.
+  const out: Point[] = [];
+  let acc = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const seg = dist(a, b);
+    if (acc + seg < start) {
+      acc += seg;
+      continue;
+    }
+
+    if (out.length === 0) {
+      const t = seg < 1e-9 ? 0 : (start - acc) / seg;
+      out.push(lerp(a, b, t));
+    }
+
+    out.push(b);
+    acc += seg;
+  }
+
+  if (out.length === 0) out.push(points[points.length - 1]);
+  return out;
+}
+
+function resistorZigZag(center: Point, dir: Point, length = 44, amp = 6, zigs = 6): string {
+  const u = normalize(dir);
+  const n = { x: -u.y, y: u.x };
+
+  const pts: Point[] = [];
+  const steps = zigs * 2;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const along = (t - 0.5) * length;
+    const side = i === 0 || i === steps ? 0 : (i % 2 === 0 ? -amp : amp);
+    pts.push({ x: center.x + along * u.x + side * n.x, y: center.y + along * u.y + side * n.y });
+  }
+  return polyline(pts, "#0f172a", 2);
+}
+
+function arrow(center: Point, dir: Point, size = 9): string {
+  const u = normalize(dir);
+  const p2 = { x: center.x + u.x * 12, y: center.y + u.y * 12 };
+  const angle = Math.atan2(u.y, u.x);
+  const a1 = angle + Math.PI * 0.85;
+  const a2 = angle - Math.PI * 0.85;
+  const pA = { x: p2.x + size * Math.cos(a1), y: p2.y + size * Math.sin(a1) };
+  const pB = { x: p2.x + size * Math.cos(a2), y: p2.y + size * Math.sin(a2) };
+  return `<path d="M ${pA.x} ${pA.y} L ${p2.x} ${p2.y} L ${pB.x} ${pB.y}" fill="none" stroke="#0f172a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />`;
 }
 
 export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): string {
@@ -79,26 +193,81 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
   for (const e of circuit.elements) {
     const p1 = pos[e.a];
     const p2 = pos[e.b];
-    const m = mid(p1, p2);
+    const route = orthogonalRoute(p1, p2);
+    const total = polyLen(route);
+    const midD = total / 2;
 
-    body += line(p1, p2, "#0f172a", 2);
+    // Default: just draw the routed wire.
+    const stroke = "#0f172a";
 
     if (el(e, "R")) {
       const r = e as Resistor;
-      body += elementLabel({ x: m.x, y: m.y - 6 }, `${r.id} ${r.ohms}Ω`);
-      body += arrow(p1, m);
+      const symLen = 46;
+      const d1 = Math.max(0, midD - symLen / 2);
+      const d2 = Math.min(total, midD + symLen / 2);
+
+      const c = pointAt(route, midD);
+      const s1 = pointAt(route, d1);
+      const s2 = pointAt(route, d2);
+
+      body += polyline(prefixTo(route, d1), stroke, 2);
+      body += polyline(suffixFrom(route, d2), stroke, 2);
+
+      body += resistorZigZag(c.p, c.dir, symLen, 6, 6);
+
+      // Current direction arrow (convention: a → b) near the symbol.
+      body += arrow(c.p, c.dir);
+
+      // Label slightly off the wire.
+      const n = { x: -c.dir.y, y: c.dir.x };
+      body += elementLabel({ x: c.p.x + n.x * 18, y: c.p.y + n.y * 18 }, `${r.id}  ${r.ohms} Ω`);
+
+      // Small junction markers at symbol endpoints to make the break clear.
+      body += circle(s1.p, 2.2, "#0f172a");
+      body += circle(s2.p, 2.2, "#0f172a");
     } else if (el(e, "V")) {
       const v = e as VSource;
-      body += `<circle cx="${m.x}" cy="${m.y}" r="14" fill="#fff" stroke="#0f172a" stroke-width="2" />`;
-      body += elementLabel({ x: m.x, y: m.y + 4 }, `${v.id} ${v.volts}V`);
-      // Mark polarity: + near a, - near b
-      body += `<text x="${p1.x - 10}" y="${p1.y - 10}" font-size="14" fill="#0f172a">+</text>`;
-      body += `<text x="${p2.x - 10}" y="${p2.y - 10}" font-size="14" fill="#0f172a">−</text>`;
+      const gap = 32;
+      const d1 = Math.max(0, midD - gap / 2);
+      const d2 = Math.min(total, midD + gap / 2);
+      const c = pointAt(route, midD);
+      const s1 = pointAt(route, d1);
+      const s2 = pointAt(route, d2);
+
+      body += polyline(prefixTo(route, d1), stroke, 2);
+      body += polyline(suffixFrom(route, d2), stroke, 2);
+
+      body += `<circle cx="${c.p.x}" cy="${c.p.y}" r="14" fill="#fff" stroke="#0f172a" stroke-width="2" />`;
+
+      // Polarity inside the symbol (a is +, b is -).
+      const n = { x: -c.dir.y, y: c.dir.x };
+      body += `<text x="${c.p.x - n.x * 6}" y="${c.p.y - n.y * 6}" font-size="14" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">+</text>`;
+      body += `<text x="${c.p.x + n.x * 6}" y="${c.p.y + n.y * 6}" font-size="14" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">−</text>`;
+
+      body += elementLabel({ x: c.p.x, y: c.p.y - 20 }, `${v.id}  ${v.volts} V`);
+
+      body += circle(s1.p, 2.2, "#0f172a");
+      body += circle(s2.p, 2.2, "#0f172a");
     } else if (el(e, "I")) {
       const s = e as ISource;
-      body += `<circle cx="${m.x}" cy="${m.y}" r="14" fill="#fff" stroke="#0f172a" stroke-width="2" />`;
-      body += elementLabel({ x: m.x, y: m.y + 4 }, `${s.id} ${s.amps}A`);
-      body += arrow(p1, p2);
+      const gap = 32;
+      const d1 = Math.max(0, midD - gap / 2);
+      const d2 = Math.min(total, midD + gap / 2);
+      const c = pointAt(route, midD);
+      const s1 = pointAt(route, d1);
+      const s2 = pointAt(route, d2);
+
+      body += polyline(prefixTo(route, d1), stroke, 2);
+      body += polyline(suffixFrom(route, d2), stroke, 2);
+
+      body += `<circle cx="${c.p.x}" cy="${c.p.y}" r="14" fill="#fff" stroke="#0f172a" stroke-width="2" />`;
+      body += arrow({ x: c.p.x - c.dir.x * 6, y: c.p.y - c.dir.y * 6 }, c.dir, 8);
+      body += elementLabel({ x: c.p.x, y: c.p.y - 20 }, `${s.id}  ${s.amps} A`);
+
+      body += circle(s1.p, 2.2, "#0f172a");
+      body += circle(s2.p, 2.2, "#0f172a");
+    } else {
+      body += polyline(route, stroke, 2);
     }
   }
 
