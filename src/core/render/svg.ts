@@ -64,11 +64,31 @@ function hashStr(s: string): number {
 }
 
 function labelOffset(id: string, dir: Point): { dx: number; dy: number } {
+  // Pick among multiple candidate directions/magnitudes deterministically.
+  // This is a lightweight "collision reduction" heuristic.
   const h = hashStr(id);
-  const sign = h % 2 === 0 ? 1 : -1;
-  const mag = 20 + ((h >>> 1) % 3) * 10; // 20, 30, 40
-  const n = normalize({ x: -dir.y, y: dir.x });
-  return { dx: n.x * mag * sign, dy: n.y * mag * sign };
+
+  // Candidate direction unit vectors (screen space)
+  const dirs: Point[] = [
+    { x: 0, y: -1 },
+    { x: 1, y: -1 },
+    { x: 1, y: 0 },
+    { x: 1, y: 1 },
+    { x: 0, y: 1 },
+    { x: -1, y: 1 },
+    { x: -1, y: 0 },
+    { x: -1, y: -1 },
+  ].map(normalize);
+
+  // Bias one candidate to be perpendicular to the element direction.
+  const perp = normalize({ x: -dir.y, y: dir.x });
+  dirs[0] = perp;
+  dirs[4] = { x: -perp.x, y: -perp.y };
+
+  const idx = h % dirs.length;
+  const mag = 28 + ((h >>> 3) % 4) * 12; // 28, 40, 52, 64
+  const v = dirs[idx];
+  return { dx: v.x * mag, dy: v.y * mag };
 }
 
 function dist(a: Point, b: Point): number {
