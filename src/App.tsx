@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import "./App.css";
 
+const BUILD_ID: string = (import.meta as any).env?.VITE_BUILD_ID ?? "dev";
+
 import { demoCircuit } from "./core/demo/circuits";
 import { solveCircuitMNA } from "./core/solver/mna";
 import { renderCircuitSvg } from "./core/render/svg";
@@ -31,6 +33,8 @@ function App() {
   const [result, setResult] = useState<ReturnType<typeof validateAnswers> | null>(null);
   const [shareMsg, setShareMsg] = useState<string>("");
 
+  const [zoom, setZoom] = useState<number>(1);
+
   const sol = useMemo(() => solveCircuitMNA(state.circuit), [state.circuit]);
   const svg = useMemo(() => renderCircuitSvg(state.circuit), [state.circuit]);
 
@@ -44,6 +48,7 @@ function App() {
     setErrorsI({});
     setErrorReq("");
     setShareMsg("");
+    setZoom(1);
   }
 
   function onValidate() {
@@ -122,8 +127,31 @@ function App() {
 
       <main className="grid">
         <section className="card">
-          <h2>Circuito</h2>
-          <div className="svg" dangerouslySetInnerHTML={{ __html: svg }} />
+          <div className="cardTop">
+            <h2>Circuito</h2>
+            <div className="miniActions">
+              <button
+                onClick={() => setZoom((z) => Math.max(0.6, Math.round((z - 0.1) * 10) / 10))}
+                title="Zoom -"
+              >
+                −
+              </button>
+              <button
+                onClick={() => setZoom(1)}
+                title="Reset zoom"
+              >
+                1×
+              </button>
+              <button
+                onClick={() => setZoom((z) => Math.min(2.2, Math.round((z + 0.1) * 10) / 10))}
+                title="Zoom +"
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          <div className="svg" style={{ transform: `scale(${zoom})`, transformOrigin: "0 0" }} dangerouslySetInnerHTML={{ __html: svg }} />
           <div className="hint">Convención: I(R) positiva en el sentido indicado (a → b).</div>
         </section>
 
@@ -215,6 +243,8 @@ function App() {
           {result && <div className={`status ${allOk ? "ok" : "bad"}`}>{allOk ? "Todo correcto" : "Hay errores"}</div>}
         </section>
       </main>
+
+      <footer className="foot">Build: {BUILD_ID}</footer>
     </div>
   );
 }
