@@ -38,11 +38,11 @@ export function defaultLayout(circuit: Circuit): NodePos {
 
 function polyline(points: Point[], stroke = "#0f172a", width = 2): string {
   const pts = points.map((p) => `${p.x},${p.y}`).join(" ");
-  return `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" />`;
+  return `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />`;
 }
 
 function circle(p: Point, r = 6, fill = "#111827"): string {
-  return `<circle cx="${p.x}" cy="${p.y}" r="${r}" fill="${fill}" />`;
+  return `<circle cx="${p.x}" cy="${p.y}" r="${r}" fill="${fill}" vector-effect="non-scaling-stroke" />`;
 }
 
 function escapeXml(s: string): string {
@@ -56,11 +56,11 @@ function escapeXml(s: string): string {
 function text(p: Point, t: string, dy = -10): string {
   const x = p.x + 8;
   const y = p.y + dy;
-  return `<text x="${x}" y="${y}" font-family="ui-sans-serif, system-ui" font-size="12" fill="#111827">${escapeXml(t)}</text>`;
+  return `<text class="nodeLbl" x="${x}" y="${y}">${escapeXml(t)}</text>`;
 }
 
 function elementLabel(p: Point, t: string): string {
-  return `<text x="${p.x}" y="${p.y}" font-family="ui-sans-serif, system-ui" font-size="12" fill="#111827" text-anchor="middle" dominant-baseline="middle">${escapeXml(t)}</text>`;
+  return `<text class="lbl" x="${p.x}" y="${p.y}" text-anchor="middle" dominant-baseline="middle">${escapeXml(t)}</text>`;
 }
 
 function hashStr(s: string): number {
@@ -247,10 +247,20 @@ function arrow(center: Point, dir: Point, size = 9): string {
   return `<path d="M ${pA.x} ${pA.y} L ${p2.x} ${p2.y} L ${pB.x} ${pB.y}" fill="none" stroke="#0f172a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />`;
 }
 
-export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): string {
-  const width = opts.width ?? 640;
-  const height = opts.height ?? 360;
+function computeViewBox(pos: NodePos, padding = 72): { x: number; y: number; w: number; h: number } {
+  const pts = Object.values(pos);
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const minX = Math.min(...xs) - padding;
+  const maxX = Math.max(...xs) + padding;
+  const minY = Math.min(...ys) - padding;
+  const maxY = Math.max(...ys) + padding;
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+export function renderCircuitSvg(circuit: Circuit, _opts: RenderOptions = {}): string {
   const pos = defaultLayout(circuit);
+  const vb = computeViewBox(pos, 72);
 
   let body = "";
 
@@ -326,7 +336,7 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
   }
 
   const placed = placeLabels(labels, {
-    viewport: { x: 0, y: 0, w: width, h: height },
+    viewport: { x: vb.x, y: vb.y, w: vb.w, h: vb.h },
     obstacles,
     refinePasses: 3,
     nearDistPx: 12,
@@ -360,10 +370,7 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
 
       body += resistorZigZag(c.p, c.dir, symLen, 6, 6);
 
-      // Current direction arrow (convention: a → b) near the symbol.
-      body += arrow(c.p, c.dir);
-
-      // Label offset (deterministic) to reduce collisions when multiple elements meet near a node.
+      // Label (placed to avoid overlaps)
       const pl = placedById.get(r.id);
       if (pl) body += elementLabel({ x: pl.x, y: pl.y }, pl.text);
 
@@ -385,9 +392,15 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
       body += `<circle cx="${c.p.x}" cy="${c.p.y}" r="14" fill="#fff" stroke="#0f172a" stroke-width="2" />`;
 
       // Polarity inside the symbol (a is +, b is -).
-      const n = normalize({ x: -c.dir.y, y: c.dir.x });
-      body += `<text x="${c.p.x - n.x * 6}" y="${c.p.y - n.y * 6}" font-size="14" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">+</text>`;
-      body += `<text x="${c.p.x + n.x * 6}" y="${c.p.y + n.y * 6}" font-size="14" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">−</text>`;
+      // Place +/− along the element direction for readability.
+      const u = normalize(c.dir);
+      const pPlus = { x: c.p.x - u.x * 7, y: c.p.y - u.y * 7 };
+      const pMinus = { x: c.p.x + u.x * 7, y: c.p.y + u.y * 7 };
+      // Knockout backing so symbols are readable over strokes.
+      body += `<circle cx="${pPlus.x}" cy="${pPlus.y}" r="5" fill="#fff" />`;
+      body += `<circle cx="${pMinus.x}" cy="${pMinus.y}" r="5" fill="#fff" />`;
+      body += `<text class="lbl" x="${pPlus.x}" y="${pPlus.y}" font-size="13" font-weight="700" fill="#1d4ed8" text-anchor="middle" dominant-baseline="middle">+</text>`;
+      body += `<text class="lbl" x="${pMinus.x}" y="${pMinus.y}" font-size="13" font-weight="700" fill="#1d4ed8" text-anchor="middle" dominant-baseline="middle">−</text>`;
 
       const pl = placedById.get(v.id);
       if (pl) body += elementLabel({ x: pl.x, y: pl.y }, pl.text);
@@ -435,9 +448,16 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
     body += `<text x="${pB.x - 6}" y="${pB.y - 10}" font-size="12" fill="#2563eb">B</text>`;
   }
 
+  const style = `
+<style>
+  .lbl { font-family: ui-sans-serif, system-ui; font-size: 12px; fill: #111827; }
+  .nodeLbl { font-family: ui-sans-serif, system-ui; font-size: 10px; fill: #64748b; }
+</style>`;
+
   return `\
-<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMinYMin meet">\
-  <rect x="0" y="0" width="${width}" height="${height}" fill="#f8fafc" />\
+<svg viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">\
+  ${style}\
+  <rect x="${vb.x}" y="${vb.y}" width="${vb.w}" height="${vb.h}" fill="#f8fafc" />\
   ${body}\
 </svg>`;
 }
