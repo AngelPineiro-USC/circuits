@@ -45,14 +45,22 @@ function circle(p: Point, r = 6, fill = "#111827"): string {
   return `<circle cx="${p.x}" cy="${p.y}" r="${r}" fill="${fill}" />`;
 }
 
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function text(p: Point, t: string, dy = -10): string {
   const x = p.x + 8;
   const y = p.y + dy;
-  return `<text x="${x}" y="${y}" font-family="ui-sans-serif, system-ui" font-size="12" fill="#111827">${t}</text>`;
+  return `<text x="${x}" y="${y}" font-family="ui-sans-serif, system-ui" font-size="12" fill="#111827">${escapeXml(t)}</text>`;
 }
 
 function elementLabel(p: Point, t: string): string {
-  return `<text x="${p.x}" y="${p.y}" font-family="ui-sans-serif, system-ui" font-size="12" fill="#111827" text-anchor="middle" dominant-baseline="middle">${t}</text>`;
+  return `<text x="${p.x}" y="${p.y}" font-family="ui-sans-serif, system-ui" font-size="12" fill="#111827" text-anchor="middle" dominant-baseline="middle">${escapeXml(t)}</text>`;
 }
 
 function hashStr(s: string): number {
@@ -270,7 +278,7 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
   for (const e of circuit.elements) {
     const p1 = pos[e.a];
     const p2 = pos[e.b];
-    const route = routeForElementId(p1, p2, (e as any).id ?? `${e.kind}:${e.a}->${e.b}`);
+    const route = routeForElementId(p1, p2, e.id);
     const total = polyLen(route);
     const midD = total / 2;
     const c = pointAt(route, midD);
@@ -330,7 +338,7 @@ export function renderCircuitSvg(circuit: Circuit, opts: RenderOptions = {}): st
   for (const e of circuit.elements) {
     const p1 = pos[e.a];
     const p2 = pos[e.b];
-    const route = routeForElementId(p1, p2, (e as any).id ?? `${e.kind}:${e.a}->${e.b}`);
+    const route = routeForElementId(p1, p2, e.id);
     const total = polyLen(route);
     const midD = total / 2;
 

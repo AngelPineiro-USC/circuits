@@ -2,32 +2,28 @@ export type NodeId = string;
 
 export type ElementId = string;
 
-export type TwoTerminal = {
+export type ElementBase = {
+  id: ElementId;
   a: NodeId;
   b: NodeId;
 };
 
-export type Resistor = {
+export type Resistor = ElementBase & {
   kind: "R";
-  id: ElementId;
-  a: NodeId;
-  b: NodeId;
   ohms: number;
   // Convention for current reporting: positive current flows from a -> b
 };
 
-export type VSource = {
+export type VSource = ElementBase & {
   kind: "V";
-  id: ElementId;
   a: NodeId; // positive terminal at node a
   b: NodeId; // negative terminal at node b
   volts: number;
   // Positive current variable defined flowing from a -> b through the source
 };
 
-export type ISource = {
+export type ISource = ElementBase & {
   kind: "I";
-  id: ElementId;
   a: NodeId; // current flows from a -> b
   b: NodeId;
   amps: number;
